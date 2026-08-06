@@ -50,3 +50,11 @@ For binary segmentation problems, just use folder 0.
 
 2.Evaluate.
 >python val.py --name <exp name>
+
+Dataset Availability
+The datasets used in this study are publicly available from:
+- CVC-ClinicDB: https://polyp.grand-challenge.org/CVCClinicDB/
+- Kvasir-SEG: https://datasets.simula.no/kvasir-seg/
+- CVC-ColonDB: https://pages.cvc.uab.es/CVC-Colon/
+- ETIS-LaribPolypDB: https://polyp.grand-challenge.org/ETISLarib/
+- CVC-300: https://pages.cvc.uab.es/CVC-Colon/index.php/databases/cvc-endoscenestill/

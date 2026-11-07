@@ -1,11 +1,6 @@
-import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import nn
-from mmcv.cnn import build_norm_layer
-" pip install mmcv==2.0.0 -f https://download.openmmlab.com/mmcv/dist/cu117/torch1.13/index.html   "
-
-"SEAFORMER: SQUEEZE-ENHANCED AXIAL TRANSFORMER FOR MOBILE SEMANTIC SEGMENTATION"
 
 
 class Conv2d_BN(nn.Sequential):
@@ -23,7 +18,11 @@ class Conv2d_BN(nn.Sequential):
 
         self.add_module('c', nn.Conv2d(
             a, b, ks, stride, pad, dilation, groups, bias=False))
-        bn = build_norm_layer(norm_cfg, b)[1]
+        if norm_cfg.get('type', 'BN') != 'BN':
+            raise ValueError(f"Only BatchNorm2d is supported, got {norm_cfg}")
+        bn = nn.BatchNorm2d(b)
+        for parameter in bn.parameters():
+            parameter.requires_grad = bool(norm_cfg.get('requires_grad', True))
         nn.init.constant_(bn.weight, bn_weight_init)
         nn.init.constant_(bn.bias, 0)
         self.add_module('bn', bn)

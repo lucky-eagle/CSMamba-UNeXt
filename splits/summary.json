@@ -1,0 +1,47 @@
+{
+  "seed": 41,
+  "protocols": {
+    "clinicdb": {
+      "counts": {
+        "train": 490,
+        "val": 61,
+        "test": 61
+      },
+      "groups": {
+        "train": 23,
+        "val": 3,
+        "test": 3
+      }
+    },
+    "kvasir": {
+      "counts": {
+        "train": 800,
+        "val": 100,
+        "test": 100
+      },
+      "groups": {
+        "train": 800,
+        "val": 100,
+        "test": 100
+      }
+    },
+    "combined": {
+      "counts": {
+        "train": 1290,
+        "val": 161,
+        "test": 161
+      },
+      "groups": {
+        "train": 831,
+        "val": 127,
+        "test": 121
+      }
+    }
+  },
+  "pooled_reserved_test_policy": "manifest only; not evaluated or reported",
+  "external": {
+    "cvc-300": 60,
+    "cvc-colondb": 380,
+    "etis": 196
+  }
+}

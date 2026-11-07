@@ -1,96 +1,130 @@
-import os
+"""Manifest-based polyp dataset and the preprocessing described in the paper."""
 
-import cv2
+import csv
+import random
+from pathlib import Path
+from typing import Dict, List, Optional
+
 import numpy as np
 import torch
-import torch.utils.data
+from PIL import Image
+from torch.utils.data import Dataset
 
-class Dataset(torch.utils.data.Dataset):
-    def __init__(self, img_ids, img_dir, mask_dir, img_ext, mask_ext, num_classes, transform=None):
-        """
-        Args:
-            img_ids (list): Image ids.
-            img_dir: Image file directory.
-            mask_dir: Mask file directory.
-            img_ext (str): Image file extension.
-            mask_ext (str): Mask file extension.
-            num_classes (int): Number of classes.
-            transform (Compose, optional): Compose transforms of albumentations. Defaults to None.
 
-        Note:
-            Make sure to put the files as the following structure:
-            <dataset name>
-            ├── images
-            |   ├── 0a7e06.jpg
-            │   ├── 0aab0a.jpg
-            │   ├── 0b1761.jpg
-            │   ├── ...
-            |
-            └── masks
-                ├── 0
-                |   ├── 0a7e06.png
-                |   ├── 0aab0a.png
-                |   ├── 0b1761.png
-                |   ├── ...
-                |
-                ├── 1
-                |   ├── 0a7e06.png
-                |   ├── 0aab0a.png
-                |   ├── 0b1761.png
-                |   ├── ...
-                ...
-        """
-        self.img_ids = img_ids
-        self.img_dir = img_dir
-        self.mask_dir = mask_dir
-        self.img_ext = img_ext
-        self.mask_ext = mask_ext
-        self.num_classes = num_classes
-        self.transform = transform
+def _resolve_path(value: str, data_root: Path) -> Path:
+    path = Path(value)
+    return path if path.is_absolute() else data_root / path
 
-    def __len__(self):
-        return len(self.img_ids)
 
-    def __getitem__(self, idx):
-        img_id = self.img_ids[idx]
-        img_path = os.path.join(self.img_dir, img_id + self.img_ext)
+def read_manifest(path: Path) -> List[Dict[str, str]]:
+    with Path(path).open(newline="", encoding="utf-8-sig") as handle:
+        rows = list(csv.DictReader(handle))
+    required = {"sample_id", "dataset", "group", "image", "mask"}
+    if not rows:
+        raise ValueError(f"Empty manifest: {path}")
+    missing = required.difference(rows[0])
+    if missing:
+        raise ValueError(f"Manifest {path} is missing columns: {sorted(missing)}")
+    sample_ids = [row["sample_id"] for row in rows]
+    if len(sample_ids) != len(set(sample_ids)):
+        raise ValueError(f"Duplicate sample_id values in {path}")
+    return rows
 
-        # --- 图像读取 ---
-        if not os.path.exists(img_path):
-            raise FileNotFoundError(f"Image file not found: {img_path}")
 
-        img = cv2.imread(img_path)
-        if img is None:
-            raise ValueError(f"Failed to read image file: {img_path}")
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+def preprocess_rgb_image(
+    image: Image.Image,
+    size: int = 256,
+    mean=(0.5, 0.5, 0.5),
+    std=(0.5, 0.5, 0.5),
+) -> torch.Tensor:
+    image = image.convert("RGB").resize((size, size), Image.Resampling.BILINEAR)
+    array = np.asarray(image, dtype=np.float32).transpose(2, 0, 1) / 255.0
+    mean_array = np.asarray(mean, dtype=np.float32)[:, None, None]
+    std_array = np.asarray(std, dtype=np.float32)[:, None, None]
+    if np.any(std_array == 0):
+        raise ValueError("Normalization standard deviation must be non-zero")
+    return torch.from_numpy(((array - mean_array) / std_array).copy())
 
-        # --- 掩码读取 ---
-        mask = []
-        for i in range(self.num_classes):
-            mask_path = os.path.join(self.mask_dir, str(i), img_id + self.mask_ext)
 
-            if not os.path.exists(mask_path):
-                raise FileNotFoundError(f"Mask file not found: {mask_path}")
+def preprocess_binary_mask(mask: Image.Image, size: int = 256) -> torch.Tensor:
+    mask = mask.convert("L").resize((size, size), Image.Resampling.NEAREST)
+    array = np.asarray(mask, dtype=np.uint8)
+    return torch.from_numpy((array >= 128).astype(np.float32, copy=False)[None].copy())
 
-            mask_img = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
-            if mask_img is None:
-                raise ValueError(f"Failed to read mask file: {mask_path}")
 
-            mask.append(mask_img[..., None])
+class ManifestDataset(Dataset):
+    """Load image/mask pairs from an auditable CSV split manifest.
 
-        mask = np.dstack(mask)
+    Training augmentation follows the manuscript exactly: horizontal and
+    vertical flips are independent Bernoulli(0.5) operations; with probability
+    0.5, one of 90, 180 or 270 degrees is sampled uniformly. Evaluation is
+    deterministic and performs no stochastic augmentation.
+    """
 
-        # --- 数据增强 ---
-        if self.transform is not None:
-            augmented = self.transform(image=img, mask=mask)
-            img = augmented['image']
-            mask = augmented['mask']
+    def __init__(
+        self,
+        manifest: Path,
+        data_root: Path,
+        size: int = 256,
+        train: bool = False,
+        limit: Optional[int] = None,
+        mean=(0.5, 0.5, 0.5),
+        std=(0.5, 0.5, 0.5),
+    ):
+        self.manifest = Path(manifest)
+        self.data_root = Path(data_root)
+        self.rows = read_manifest(self.manifest)
+        if limit is not None:
+            if limit <= 0:
+                raise ValueError("limit must be positive")
+            self.rows = self.rows[:limit]
+        self.size = int(size)
+        self.train = bool(train)
+        self.mean = tuple(float(value) for value in mean)
+        self.std = tuple(float(value) for value in std)
 
-        # --- 格式调整 ---
-        img = img.astype('float32') / 255
-        img = img.transpose(2, 0, 1)
+    def __len__(self) -> int:
+        return len(self.rows)
 
-        mask = mask.astype('float32') / 255
-        mask = mask.transpose(2, 0, 1)
+    @staticmethod
+    def _augment(image: Image.Image, mask: Image.Image):
+        if random.random() < 0.5:
+            image = image.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+            mask = mask.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+        if random.random() < 0.5:
+            image = image.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
+            mask = mask.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
+        if random.random() < 0.5:
+            angle = 90 * random.randint(1, 3)
+            image = image.rotate(angle, resample=Image.Resampling.BILINEAR, expand=True)
+            mask = mask.rotate(angle, resample=Image.Resampling.NEAREST, expand=True)
+        return image, mask
 
-        return img, mask, {'img_id': img_id}
+    def __getitem__(self, index: int):
+        row = self.rows[index]
+        image_path = _resolve_path(row["image"], self.data_root)
+        mask_path = _resolve_path(row["mask"], self.data_root)
+        if not image_path.is_file():
+            raise FileNotFoundError(f"Image not found for {row['sample_id']}: {image_path}")
+        if not mask_path.is_file():
+            raise FileNotFoundError(f"Mask not found for {row['sample_id']}: {mask_path}")
+        with Image.open(image_path) as handle:
+            image = handle.convert("RGB")
+        with Image.open(mask_path) as handle:
+            mask = handle.convert("L")
+        if image.size != mask.size:
+            raise ValueError(
+                f"Image/mask size mismatch for {row['sample_id']}: "
+                f"{image.size} vs {mask.size}"
+            )
+        if self.train:
+            image, mask = self._augment(image, mask)
+        image_tensor = preprocess_rgb_image(image, self.size, self.mean, self.std)
+        mask_tensor = preprocess_binary_mask(mask, self.size)
+        return image_tensor, mask_tensor, row["sample_id"]
+
+
+def seed_worker(_worker_id: int) -> None:
+    worker_seed = torch.initial_seed() % (2**32)
+    random.seed(worker_seed)
+    np.random.seed(worker_seed)

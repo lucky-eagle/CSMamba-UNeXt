@@ -1,26 +1,8 @@
 name: csmamba-unext
 channels:
-  - pytorch
-  - nvidia
-  - defaults
+  - conda-forge
 dependencies:
-  - python=3.8
+  - python=3.13.3
   - pip
-  - pytorch=2.2.0
-  - torchvision=0.17.0
-  - torchaudio=2.2.0
-  - cudatoolkit=11.8
   - pip:
-    - albumentations
-    - mamba-ssm
-    - mmcv
-    - einops
-    - timm>=0.6.5
-    - opencv-python
-    - addict
-    - perceptual
-    - scikit-image
-    - scipy
-    - pillow
-    - tifffile
-    - yapf
+      - -r requirements-windows.txt

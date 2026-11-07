@@ -1,45 +1,16 @@
-import torch
-from torch import nn
-import torch
-import torchvision
-from torch import nn
-from torch.autograd import Variable
-from torch.utils.data import DataLoader
-from torchvision import transforms
-from torchvision.utils import save_image
-import torch.nn.functional as F
-import os
-import matplotlib.pyplot as plt
-from utils import *
-from SeaAttention import Sea_Attention
-from Fusion_mamba import VSSBlock
+import math
 from functools import partial
 from typing import Callable
-from CSMamba import SS2D, ChannelAttentionModule, SpatialAttentionModule
 
-__all__ = ['CSMamba-UNeXt']
-
-import timm
+import torch
+import torch.nn.functional as F
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
-import types
-import math
-from abc import ABCMeta, abstractmethod
-from mmcv.cnn import ConvModule
-import pdb
+from torch import nn
 
-def conv1x1(in_planes: int, out_planes: int,
-            stride: int = 1) -> nn.Conv2d:  # in_planes: 输入通道数 out_planes: 输出通道数 stride: 步长(虽然定义了但固定为1)
-    """1x1 convolution"""
-    return nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=1, bias=False)  # 使用1×1的卷积核 无偏置项(bias=False)
+from CSMamba import SS2D
+from SeaAttention import Sea_Attention
 
-
-def shift(dim): #实现特征图移位操作的函数：对输入特征图沿指定维度dim进行不同距离的循环移位；将所有移位后的特征图拼接起来；使用narrow裁剪掉边缘部分
-    x_shift = [torch.roll(x_c, shift, dim) for x_c, shift in zip(xs, range(-self.pad, self.pad + 1))] #torch.roll 实现循环移位
-    x_cat = torch.cat(x_shift, 1) #dim: 移位的维度 self.pad: 移位的最大距离 H, W: 特征图的高度和宽度
-    x_cat = torch.narrow(x_cat, 2, self.pad, H) #torch.cat 沿通道维度拼接
-    x_cat = torch.narrow(x_cat, 3, self.pad, W) #torch.narrow 裁剪特征图边界
-    return x_cat
-
+__all__ = ["CSMambaUNeXt"]
 
 class BSConvS(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1,
@@ -414,10 +385,14 @@ class CSMambaBlock(nn.Module):
         y = self.drop_path(self.self_attention(self.ln1(x0)))
         # 3) 通道升维 + 残差
         return self.up(x0 + y) + x
-#完整CSMamba-UNeXt
-class CSMamba-UNeXt(nn.Module):
-    def __init__(self, num_classes, img_size=224, embed_dims=[128, 160, 256], drop_path_rate=0.1, drop_rate=0.3):
+# Complete CSMamba-UNeXt model.  The Python identifier cannot contain a hyphen;
+# the public model name remains "CSMamba-UNeXt" through model_factory.py.
+class CSMambaUNeXt(nn.Module):
+    def __init__(self, num_classes, img_size=256, embed_dims=None, drop_path_rate=0.1, drop_rate=0.2):
         super().__init__()
+
+        if embed_dims is None:
+            embed_dims = [128, 160, 256]
 
         self.attention1 = Sea_Attention(dim=32, key_dim=8, num_heads=2)
         self.attention2 = Sea_Attention(dim=128, key_dim=16, num_heads=4)
@@ -456,6 +431,7 @@ class CSMamba-UNeXt(nn.Module):
 
     def forward(self, x):
         B = x.size(0)
+        input_size = x.shape[-2:]
 
         t1 = self.enhance_t1(F.max_pool2d(self.encoder1(x), 2))
         t2 = self.enhance_t2(self.attention1(F.max_pool2d(self.encoder2(t1), 2)))
@@ -498,8 +474,6 @@ class CSMamba-UNeXt(nn.Module):
         out = self.up4_conv(out)
 
         out = self.final(out)
-        out = F.interpolate(out, size=(512, 512), mode='bilinear', align_corners=False)
-        aux_out = F.interpolate(aux_out, size=(512, 512), mode='bilinear', align_corners=False)
+        out = F.interpolate(out, size=input_size, mode='bilinear', align_corners=False)
+        aux_out = F.interpolate(aux_out, size=input_size, mode='bilinear', align_corners=False)
         return out, aux_out
-
-

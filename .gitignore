@@ -1,0 +1,12 @@
+inputs/
+experiments/
+weights/
+*.pt
+*.pth
+*.ckpt
+__pycache__/
+*.py[cod]
+.venv/
+.vscode/
+.idea/
+Thumbs.db

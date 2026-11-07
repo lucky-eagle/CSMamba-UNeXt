@@ -11,21 +11,26 @@ __all__ = ['BCEDiceLoss', 'LovaszHingeLoss']
 
 
 class BCEDiceLoss(nn.Module):
-    def __init__(self):
+    """Unweighted BCE-with-logits plus per-image soft Dice loss."""
+
+    def __init__(self, smooth=1.0):
         super().__init__()
+        self.smooth = float(smooth)
 
     def forward(self, input, target):
         bce = F.binary_cross_entropy_with_logits(input, target)
-        smooth = 1e-5
-
-        input = torch.sigmoid(input)
+        probability = torch.sigmoid(input)
         num = target.size(0)
-        input = input.view(num, -1)
-        target = target.view(num, -1)
-        intersection = (input * target)
-        dice = (2. * intersection.sum(1) + smooth) / (input.sum(1) + target.sum(1) + smooth)
-        dice = 1 - dice.sum() / num
-        return 0.5 * bce + dice
+        probability = probability.reshape(num, -1)
+        target = target.reshape(num, -1)
+        intersection = (probability * target).sum(1)
+        dice = (
+            2.0 * intersection + self.smooth
+        ) / (
+            probability.sum(1) + target.sum(1) + self.smooth
+        )
+        dice_loss = 1.0 - dice.mean()
+        return bce + dice_loss
 
 
 class LovaszHingeLoss(nn.Module):

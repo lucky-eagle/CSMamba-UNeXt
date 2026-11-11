@@ -2,7 +2,7 @@
 
 Official code for **CSMamba-UNeXt**, a state-space-enhanced encoder-decoder for colorectal polyp segmentation.
 
-![CSMamba-UNeXt architecture](images/img.png)
+![CSMamba-UNeXt architecture](images/Fig. 1.tif)
 
 ## Environment
 
